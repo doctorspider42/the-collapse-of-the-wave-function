@@ -1,0 +1,212 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Deliberately not ubuntu-latest: a binary linked against an older glibc keeps
+          # working on newer distributions, and the reverse is not true.
+          - { os: ubuntu-22.04, label: linux,   package: collapse-linux-x86_64.tar.gz }
+          - { os: windows-2022, label: windows, package: collapse-windows-x64.zip }
+
+    env:
+      # Resolved by GitHub, not by the shell. Working the .exe suffix out in bash needs a
+      # command substitution whose exit status becomes the assignment's exit status - and
+      # on Linux that status is 1, which under `set -e` kills the step before it runs
+      # anything, with no output to explain why.
+      #
+      # Keyed off matrix, not runner.os: the runner context does not exist at job level,
+      # and using it here makes GitHub reject the whole workflow before any job starts.
+      DEVTOOL: ./build/CollapseDevTool_artefacts/Release/CollapseDevTool${{ matrix.label == 'windows' && '.exe' || '' }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ninja-build libasound2-dev libfreetype-dev libfontconfig1-dev \
+            libx11-dev libxext-dev libxrandr-dev libxinerama-dev \
+            libxcursor-dev libxcomposite-dev libxrender-dev \
+            libgl1-mesa-dev fonts-dejavu-core xvfb
+
+      - name: Configure
+        run: >
+          cmake -B build -DCMAKE_BUILD_TYPE=Release
+          -DCOLLAPSE_COPY_AFTER_BUILD=OFF
+          -DCOLLAPSE_BUILD_TOOLS=ON
+          -DCOLLAPSE_LTO=ON
+          -DCOLLAPSE_BUILD_ID=${{ github.sha }}
+
+      - name: Build
+        run: cmake --build build --config Release --parallel 4
+
+      # Runs before packaging, so a red build cannot publish.
+      - name: DSP checks
+        shell: bash
+        run: |
+          "$DEVTOOL" check
+
+      # Not an assertion, but the numbers behind Shapers.h and CabSim.h are in the log of
+      # every build, so a voicing change that moved a level shows up in the diff of two
+      # runs rather than in somebody's ears three weeks later.
+      - name: Level sweep and cabinet response
+        shell: bash
+        run: |
+          "$DEVTOOL" sweep
+          "$DEVTOOL" cab
+
+      - name: Panel smoke test
+        shell: bash
+        run: |
+          "$DEVTOOL" shot panel-${{ matrix.label }}.png
+          test -s panel-${{ matrix.label }}.png
+
+      # Without xvfb-run, pluginval silently skips every editor test and hands back a green
+      # tick that proved much less than it looks like it did.
+      - name: pluginval
+        if: runner.os == 'Linux'
+        run: |
+          # -f, so an HTTP error is an error. Without it curl exits 0 having written the
+          # error page to pluginval.zip, and the failure surfaces as a puzzling unzip
+          # message several lines later.
+          curl -fsSL -o pluginval.zip \
+            https://github.com/Tracktion/pluginval/releases/download/v1.0.3/pluginval_Linux.zip
+          unzip -q pluginval.zip
+          chmod +x pluginval
+          xvfb-run -a ./pluginval --strictness-level 8 --validate-in-process \
+            --validate "build/Collapse_artefacts/Release/VST3/The Collapse of The Wave Function.vst3"
+
+      - name: Package
+        shell: bash
+        run: |
+          name="The Collapse of The Wave Function"
+          mkdir -p "dist/$name"
+          cp -r "build/Collapse_artefacts/Release/VST3/$name.vst3" "dist/$name/"
+          if [ "$RUNNER_OS" = Windows ]; then
+            cp "build/Collapse_artefacts/Release/Standalone/$name.exe" "dist/$name/"
+          else
+            cp "build/Collapse_artefacts/Release/Standalone/$name" "dist/$name/"
+          fi
+          cp LICENSE LICENSE.AGPLv3 NOTICE.md README.md "dist/$name/"
+          cp panel-${{ matrix.label }}.png "dist/$name/panel.png"
+
+          # This file is what turns "corresponding source" from a promise into a fact.
+          {
+            echo "Source:         ${{ github.server_url }}/${{ github.repository }}"
+            echo "Commit:         ${{ github.sha }}"
+            echo "JUCE submodule: $(git -C libs/JUCE rev-parse HEAD)"
+            echo "Built on:       ${{ matrix.os }}"
+          } > "dist/$name/BUILD-INFO.txt"
+
+          cd dist
+          if [ "$RUNNER_OS" = Windows ]; then
+            7z a -tzip "../${{ matrix.package }}" "$name" > /dev/null
+          else
+            tar czf "../${{ matrix.package }}" "$name"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.label }}
+          path: ${{ matrix.package }}
+          if-no-files-found: error
+
+  # Every green push to main publishes its own release, tagged with the run number so the
+  # tags sort and nothing is ever overwritten. Only reached if the build job went green, so
+  # a failing check cannot publish.
+  #
+  # Run by hand counts too, and has to: a push whose run never happened leaves a commit on
+  # main that no amount of waiting will ever build, and the only other way to release it is
+  # an empty commit whose entire purpose is to be pushed. The run number still makes the
+  # tag, so a manual run cannot collide with anything either.
+  release:
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # needed to read the commit subject for the notes
+
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          short="${GITHUB_SHA:0:7}"
+          tag="build-${{ github.run_number }}"
+          subject="$(git log -1 --pretty=%s)"
+
+          # YAML strips the block's common indentation, so the heredoc body really does
+          # start at column 0 in the generated script - as long as every line, the
+          # terminator included, shares one indentation level here.
+          cat > notes.md <<'EOF'
+          Build from `main`. Every check in `devtool check` passed and pluginval cleared it
+          at strictness 8 on Linux — but no DAW has opened this binary, so treat it as a
+          build rather than as a vetted release.
+
+          **Install:** unzip and drop `The Collapse of The Wave Function.vst3` into your
+          VST3 folder — `%COMMONPROGRAMFILES%\VST3` on Windows, `~/.vst3` on Linux. The
+          standalone in the same archive needs nothing installing.
+
+          Each archive carries `BUILD-INFO.txt` with this commit and the exact JUCE
+          revision it was built against, which is the corresponding source this project's
+          licence requires.
+          EOF
+
+          {
+            echo ""
+            echo "---"
+            echo ""
+            echo "\`$short\` — $subject"
+          } >> notes.md
+
+          gh release create "$tag" \
+            --target "$GITHUB_SHA" \
+            --title "The Collapse of The Wave Function — build ${{ github.run_number }} ($short)" \
+            --notes-file notes.md artifacts/*
+
+  # Tags produce a draft, so notes and binaries get a human read before anyone downloads.
+  tagged-release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with: { path: artifacts, merge-multiple: true }
+
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "The Collapse of The Wave Function ${GITHUB_REF_NAME}" artifacts/*
