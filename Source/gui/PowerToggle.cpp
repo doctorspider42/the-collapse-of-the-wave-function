@@ -53,17 +53,38 @@ void PowerToggle::parameterChanged (const juce::String&, float newValue)
     });
 }
 
+void PowerToggle::toggle()
+{
+    auto* p = state.getParameter (parameterID);
+
+    if (p == nullptr)
+        return;
+
+    // The target is worked out once, up front, and then assigned rather than flipped.
+    //
+    // APVTS calls its listeners from inside setValueNotifyingHost, on the calling thread -
+    // so on a click, `parameterChanged` has already run by the time the next line is
+    // reached and `bypassed` already holds the new state. Flipping it here inverted it
+    // back, which put the lamp out of phase with the DSP and meant every second click
+    // wrote a value the parameter already held: two clicks per change, and a button that
+    // looked lit while the plug-in was bypassed.
+    //
+    // Assigning is also what makes this correct if the callback does not arrive at all,
+    // which is what happens on that second click - APVTS skips listeners when the value
+    // has not actually moved.
+    const auto wanted = ! bypassed;
+
+    p->beginChangeGesture();
+    p->setValueNotifyingHost (wanted ? 1.0f : 0.0f);
+    p->endChangeGesture();
+
+    bypassed = wanted;
+    repaint();
+}
+
 void PowerToggle::mouseDown (const juce::MouseEvent&)
 {
-    if (auto* p = state.getParameter (parameterID))
-    {
-        p->beginChangeGesture();
-        p->setValueNotifyingHost (bypassed ? 0.0f : 1.0f);
-        p->endChangeGesture();
-    }
-
-    bypassed = ! bypassed;
-    repaint();
+    toggle();
 }
 
 void PowerToggle::mouseEnter (const juce::MouseEvent&) { hovered = true;  repaint(); }

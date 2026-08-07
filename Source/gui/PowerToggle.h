@@ -41,6 +41,10 @@ public:
 
     bool isActive() const noexcept { return ! bypassed; }
 
+    /** What a click does, without a click. Public so the offline harness can exercise the
+        one piece of this widget that has any state in it. */
+    void toggle();
+
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseEnter (const juce::MouseEvent&) override;

@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(Collapse
-    VERSION 1.2.0
+    VERSION 1.2.1
     DESCRIPTION "The Collapse of The Wave Function - two bass channels, one crossover"
     LANGUAGES C CXX)
 

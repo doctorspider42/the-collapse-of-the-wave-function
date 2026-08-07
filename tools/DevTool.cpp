@@ -31,6 +31,7 @@
 #include "../Source/PluginProcessor.h"
 #include "../Source/PluginEditor.h"
 #include "../Source/dsp/Shapers.h"
+#include "../Source/gui/PowerToggle.h"
 
 #include <iostream>
 
@@ -476,6 +477,35 @@ int runCheck()
                   << " dBFS" << std::endl;
         expect (latency > 0, "the oversampler's latency is reported");
         expect (worst < 1.0e-5f, "bypass passes audio through, delayed by exactly that");
+    }
+
+    // ---- 4b. the panel's own bypass ------------------------------------------
+    // The DSP end of bypass is checked above; this is the other half, and it is the half
+    // that was broken. APVTS calls its listeners from inside setValueNotifyingHost, so a
+    // widget that both writes the parameter and flips its own copy of the state applies
+    // the change twice - and lands back where it started. What that looks like from the
+    // outside is a button that needs two clicks and a lamp that lies about which way it
+    // went, which is why this asserts on both together.
+    {
+        neutral (proc);
+        collapse::gui::PowerToggle toggle (proc.getState(), collapse::pid::bypass);
+
+        auto* parameter = proc.getState().getRawParameterValue (collapse::pid::bypass);
+        auto inPhase = parameter->load() < 0.5f && toggle.isActive();
+
+        for (int click = 1; click <= 4; ++click)
+        {
+            toggle.toggle();
+
+            // Odd clicks bypass, even ones bring it back, and the lamp is lit exactly when
+            // the parameter says the plug-in is in the path.
+            const auto expected = (click % 2) == 1;
+            const auto isBypassed = parameter->load() > 0.5f;
+
+            inPhase = inPhase && isBypassed == expected && toggle.isActive() == ! expected;
+        }
+
+        expect (inPhase, "every click on the panel's bypass changes it, and says so");
     }
 
     // ---- 5. silence in, silence out ------------------------------------------
