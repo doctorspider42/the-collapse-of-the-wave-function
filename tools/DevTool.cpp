@@ -204,12 +204,17 @@ void runThrough (Processor& proc, juce::AudioBuffer<float>& buffer, int blockSiz
     }
 }
 
-/** A known state: nothing engaged that a check has not asked for. Weight sits at its
-    neutral 50 % - the shelf is then exactly 0 dB - rather than at the shipping default. */
+/** A known state: nothing engaged that a check has not asked for. Weight, Sub and Body sit
+    at their neutral 50 % - every shelf and bell is then exactly 0 dB - rather than at the
+    shipping defaults, and both speakers are off. */
 void neutral (Processor& proc)
 {
     using namespace collapse::pid;
 
+    setParam (proc, lowSub, 50.0f);
+    setParam (proc, lowBody, 50.0f);
+    setParam (proc, lowTrim, 0.0f);
+    setParam (proc, lowCab, 0.0f);
     setParam (proc, drive, 0.0f);
     setParam (proc, blend, 0.0f);
     setParam (proc, split, 110.0f);
@@ -279,38 +284,60 @@ int runCheck()
         expect (worst < 0.8f, "the crossover sums flat when nothing is collapsed");
     }
 
-    // ---- 1b. the cabinet is on the clean path too ----------------------------
-    // The cabinet sits after the sum, so it colours both bands whatever Blend is doing -
-    // which is what makes this an amp rather than a drive pedal that still needs one. With
-    // the cabinet in front of the sum instead, this check reads zero at every frequency.
+    // ---- 1b. one speaker per path, and each of them only its own band ---------
+    // Two cabinets are what make this two amplifiers sharing a crossover rather than one
+    // amplifier with a split in the middle of it. What has to be true is not that they
+    // colour - it is that neither reaches across the split. Wire either of them back to
+    // the sum and each pair below reads the other pair's number.
+    //
+    // Measured at Blend 0, so the collapsed path is passing its band clean: a speaker on
+    // the drive channel is still a speaker on everything above the split, which is what
+    // makes it an amp rather than a pedal.
+    // Both frequencies are chosen well away from whatever the crossover is set to. Within
+    // an octave of the corner both bands carry real energy, and switching a cabinet on one
+    // of them rotates its phase against the other - so a measurement there reads as a hole
+    // in the sum rather than as the colour of a speaker, and says nothing about routing.
     {
-        auto responseWithCabinet = [&proc] (int cabinetIndex, double freq)
+        auto responseWith = [&proc] (float splitHz, int lowIndex, int highIndex, double freq)
         {
             neutral (proc);
-            setParam (proc, blend, 0.0f);       // nothing collapsed at all
-            setParam (proc, cabinet, (float) cabinetIndex);
+            setParam (proc, blend, 0.0f);
+            setParam (proc, split, splitHz);
+            setParam (proc, lowCab, (float) lowIndex);
+            setParam (proc, cabinet, (float) highIndex);
             return responseAtDb (proc, freq);
         };
 
-        auto worst = 0.0f;
-        const double points[] = { 55, 120, 400, 1500, 3500 };
+        // 250 Hz with the crossover at 700: the coherent band owns it outright.
+        const auto bareLow      = responseWith (700.0f, 0, 0, 250.0);
+        const auto coherentLow  = responseWith (700.0f, 1, 0, 250.0) - bareLow;
+        const auto collapsedLow = responseWith (700.0f, 0, 1, 250.0) - bareLow;
 
-        for (auto f : points)
-            worst = juce::jmax (worst, std::abs (responseWithCabinet (1, f)
-                                                     - responseWithCabinet (0, f)));
+        // 1.5 kHz with the crossover at 110: the collapsed band owns that one.
+        const auto bareHigh      = responseWith (110.0f, 0, 0, 1500.0);
+        const auto coherentHigh  = responseWith (110.0f, 1, 0, 1500.0) - bareHigh;
+        const auto collapsedHigh = responseWith (110.0f, 0, 1, 1500.0) - bareHigh;
 
-        std::cout << "  Cone against Off at Blend 0, worst of five bands: "
-                  << juce::String (worst, 2) << " dB" << std::endl;
-        expect (worst > 3.0f, "the cabinet colours the clean path, not only the collapsed one");
+        std::cout << "  Cone at 250 Hz under a 700 Hz split - on the coherent path: "
+                  << juce::String (coherentLow, 2) << " dB, on the collapsed path: "
+                  << juce::String (collapsedLow, 2) << " dB" << std::endl;
+        std::cout << "  Cone at 1.5 kHz over a 110 Hz split - on the coherent path: "
+                  << juce::String (coherentHigh, 2) << " dB, on the collapsed path: "
+                  << juce::String (collapsedHigh, 2) << " dB" << std::endl;
+
+        expect (std::abs (coherentLow) > 1.0f && std::abs (coherentHigh) < 0.5f,
+                "the coherent band has a speaker of its own, and it stays below the split");
+        expect (std::abs (collapsedHigh) > 3.0f && std::abs (collapsedLow) < 0.5f,
+                "the collapsed band's speaker colours its whole band and nothing under it");
     }
 
     // ---- 2. the whole point of the plug-in -----------------------------------
     // A low E through the same amp twice: once with nothing collapsed, once with the most
     // destructive voicing at full drive. Measured as a difference rather than against the
-    // input, because the cabinet now sits after the sum and a real 4x10 does not pass
-    // 41 Hz at unity - so an absolute figure would be scoring the speaker, not the
-    // crossover. What the split promises is that turning the fuzz on costs the fundamental
-    // nothing, and that is exactly what the difference measures.
+    // input, because both renders go through a Cone on the coherent path and a real 4x10
+    // does not pass 41 Hz at unity - so an absolute figure would be scoring the speaker,
+    // not the crossover. What the split promises is that turning the fuzz on costs the
+    // fundamental nothing, and that is exactly what the difference measures.
     {
         auto fundamentalDb = [&proc] (float splitHz, float blendPercent)
         {
@@ -320,6 +347,7 @@ int runCheck()
             setParam (proc, split, splitHz);
             setParam (proc, state, 3.0f);       // Collapse, the most destructive voicing
             setParam (proc, cabinet, 1.0f);
+            setParam (proc, lowCab, 1.0f);      // one Cone per path: the whole rig, twice
             proc.reset();
 
             const auto total = (int) (kSampleRate * 2.0);
@@ -366,6 +394,7 @@ int runCheck()
             setParam (proc, blend, 100.0f);
             setParam (proc, drive, 45.0f);
             setParam (proc, cabinet, 1.0f);
+            setParam (proc, lowCab, 1.0f);
             setParam (proc, id, value);
             proc.reset();
 
@@ -381,6 +410,9 @@ int runCheck()
         struct Case { const char* id; float low, high; };
         static const Case cases[] =
         {
+            { lowSub,   0.0f, 100.0f },
+            { lowBody,  0.0f, 100.0f },
+            { lowTrim, -9.0f,   9.0f },
             { drive,  5.0f,  95.0f },
             { blend,  0.0f, 100.0f },
             { split, 20.0f, 700.0f },
@@ -402,8 +434,8 @@ int runCheck()
             expect (worst > 1.0e-3f, juce::String (c.id) + " changes the output");
         }
 
-        // The two choices, the same way.
-        for (const char* id : { state, cabinet })
+        // The three choices, the same way.
+        for (const char* id : { state, cabinet, lowCab })
         {
             const auto a = renderWith (id, 0.0f);
             const auto b = renderWith (id, id == state ? 3.0f : 2.0f);
@@ -455,6 +487,7 @@ int runCheck()
         setParam (proc, drive, 100.0f);
         setParam (proc, state, 3.0f);
         setParam (proc, cabinet, 1.0f);
+        setParam (proc, lowCab, 1.0f);
         proc.reset();
 
         juce::AudioBuffer<float> buffer (2, (int) (kSampleRate * 2.0));
@@ -480,6 +513,8 @@ int runCheck()
                 setParam (proc, grit, 100.0f);
                 setParam (proc, state, (float) s);
                 setParam (proc, cabinet, (float) cabIndex);
+                setParam (proc, lowCab, (float) ((cabIndex + 1) % 3));   // never the same pair
+                setParam (proc, lowTrim, 9.0f);
                 proc.reset();
 
                 juce::AudioBuffer<float> buffer (2, (int) kSampleRate);
@@ -547,15 +582,30 @@ int runCheck()
             return responseAtDb (proc, freq);
         };
 
+        // And the same measurement where the bottom octave actually lives now: on the
+        // coherent path, through its own speaker, with the crossover where it normally is.
+        auto coherentLowEndOf = [&proc] (int cabinetIndex, double freq)
+        {
+            neutral (proc);
+            setParam (proc, blend, 0.0f);
+            setParam (proc, lowCab, (float) cabinetIndex);
+            return responseAtDb (proc, freq);
+        };
+
         const auto cone45  = lowEndOf (1, 45.0) - lowEndOf (0, 45.0);
         const auto cone70  = lowEndOf (1, 70.0) - lowEndOf (0, 70.0);
         const auto steel45 = lowEndOf (2, 45.0) - lowEndOf (0, 45.0);
+        const auto coherent45 = coherentLowEndOf (1, 45.0) - coherentLowEndOf (0, 45.0);
 
         std::cout << "  cabinet against no cabinet - Cone 45 Hz: " << juce::String (cone45, 2)
                   << " dB, Cone 70 Hz: " << juce::String (cone70, 2)
                   << " dB, Steel 45 Hz: " << juce::String (steel45, 2) << " dB" << std::endl;
+        std::cout << "  the same Cone under the split, on the coherent path, 45 Hz: "
+                  << juce::String (coherent45, 2) << " dB" << std::endl;
         expect (cone45 > -1.5f && cone70 > -1.5f && steel45 > -2.5f,
                 "the modelled port replaces the bottom octave the captures do not have");
+        expect (coherent45 > -1.5f,
+                "the coherent band keeps its bottom octave through a speaker of its own");
     }
 
     // ---- 9. aliasing --------------------------------------------------------
@@ -635,13 +685,14 @@ int runCheck()
 
             setParam (proc, state,   (float) (i % 4));
             setParam (proc, cabinet, (float) (i % 3));
+            setParam (proc, lowCab,  (float) ((i / 3) % 3));
             setParam (proc, split,   20.0f + (float) (i % 20) * 35.0f);
 
             proc.processBlock (buffer, midi);
             finite = finite && analyse (buffer).finite;
         }
 
-        expect (finite, "switching state, cabinet and crossover mid-stream stays finite");
+        expect (finite, "switching state, both cabinets and the crossover mid-stream stays finite");
     }
 
     // ---- 11. sample rates ----------------------------------------------------
@@ -657,6 +708,7 @@ int runCheck()
             setParam (other, blend, 100.0f);
             setParam (other, drive, 85.0f);
             setParam (other, cabinet, 1.0f);
+            setParam (other, lowCab, 2.0f);
             other.reset();
 
             juce::AudioBuffer<float> buffer (2, (int) rate / 2);
@@ -684,6 +736,7 @@ int runCheck()
         setParam (mono, blend, 100.0f);
         setParam (mono, drive, 70.0f);
         setParam (mono, cabinet, 1.0f);
+        setParam (mono, lowCab, 1.0f);
         mono.reset();
 
         juce::AudioBuffer<float> buffer (1, (int) kSampleRate);
@@ -705,6 +758,7 @@ int runCheck()
             setParam (proc, drive, 65.0f);
             setParam (proc, state, (float) stateIndex);
             setParam (proc, cabinet, (float) cabinetIndex);
+            setParam (proc, lowCab, (float) cabinetIndex);
             proc.reset();
 
             juce::AudioBuffer<float> buffer (2, kBlockSize);
@@ -726,10 +780,10 @@ int runCheck()
         std::cout << "\n" << seconds << " s of stereo processed in "
                   << juce::String (bare, 3) << " s  ("
                   << juce::String (bare / seconds * 100.0, 2)
-                  << " % of one core at " << kSampleRate << " Hz) with no cabinet, and in "
+                  << " % of one core at " << kSampleRate << " Hz) with no speaker, and in "
                   << juce::String (full, 3) << " s  ("
                   << juce::String (full / seconds * 100.0, 2)
-                  << " %) with three stages and a cabinet" << std::endl;
+                  << " %) with three stages and a speaker on each path" << std::endl;
     }
 
     std::cout << (failures == 0 ? "\nall checks passed"
@@ -758,9 +812,9 @@ int runSweep()
 
     // The reference: a level to aim at that does not itself move when a spec changes.
     // Straight through the plug-in with nothing collapsed - not unity any more, since the
-    // cabinet sits after the sum and colours this too, but that is the point: the cabinet
-    // is common to both sides of the comparison, so what comes out is what the drive path
-    // did and nothing else.
+    // split is parked at the bottom and the collapsed path's speaker colours this too, but
+    // that is the point: the speaker is common to both sides of the comparison, so what
+    // comes out is what the drive path did and nothing else.
     auto renderRms = [&proc] (int stateIndex, float drivePercent, bool collapsed)
     {
         neutral (proc);

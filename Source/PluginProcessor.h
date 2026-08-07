@@ -85,6 +85,7 @@ private:
     juce::AudioBuffer<float> dryBuffer;
 
     juce::SmoothedValue<float> smDrive, smBlend, smSplit, smWeight, smTone, smGrit;
+    juce::SmoothedValue<float> smLowSub, smLowBody, smLowTrim;
     juce::SmoothedValue<float> smLevel, smBypass;
 
     int currentProgram = 0;

@@ -65,10 +65,11 @@ void CollapseProcessor::prepareToPlay (double sampleRate, int maximumExpectedSam
     // and fast enough to feel immediate. Gains and the crossover get 20 ms: the crossover
     // because a slow sweep through it is a thing people do on purpose, and a 50 ms ramp
     // makes that sweep lag the knob.
-    for (auto* s : { &smDrive, &smWeight, &smTone, &smGrit })
+    for (auto* s : { &smDrive, &smWeight, &smTone, &smGrit, &smLowSub, &smLowBody })
         s->reset (sampleRate, 0.05);
 
-    for (auto* s : { &smBlend, &smSplit, &smLevel, &smBypass })
+    // Trim is a gain, and gains get the short ramp for the same reason Level does.
+    for (auto* s : { &smBlend, &smSplit, &smLevel, &smBypass, &smLowTrim })
         s->reset (sampleRate, 0.02);
 
     reset();
@@ -85,6 +86,9 @@ void CollapseProcessor::reset()
     smWeight.setCurrentAndTargetValue (handles.weight->load() * 0.01f);
     smTone  .setCurrentAndTargetValue (handles.tone->load()   * 0.01f);
     smGrit  .setCurrentAndTargetValue (handles.grit->load()   * 0.01f);
+    smLowSub .setCurrentAndTargetValue (handles.lowSub->load()  * 0.01f);
+    smLowBody.setCurrentAndTargetValue (handles.lowBody->load() * 0.01f);
+    smLowTrim.setCurrentAndTargetValue (juce::Decibels::decibelsToGain (handles.lowTrim->load()));
     smLevel .setCurrentAndTargetValue (juce::Decibels::decibelsToGain (handles.level->load()));
     smBypass.setCurrentAndTargetValue (handles.bypass->load() > 0.5f ? 1.0f : 0.0f);
 
@@ -122,11 +126,15 @@ void CollapseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
     smWeight.setTargetValue (handles.weight->load() * 0.01f);
     smTone  .setTargetValue (handles.tone->load()   * 0.01f);
     smGrit  .setTargetValue (handles.grit->load()   * 0.01f);
+    smLowSub .setTargetValue (handles.lowSub->load()  * 0.01f);
+    smLowBody.setTargetValue (handles.lowBody->load() * 0.01f);
+    smLowTrim.setTargetValue (juce::Decibels::decibelsToGain (handles.lowTrim->load()));
     smLevel .setTargetValue (juce::Decibels::decibelsToGain (handles.level->load()));
     smBypass.setTargetValue (handles.bypass->load() > 0.5f ? 1.0f : 0.0f);
 
     const auto stateIndex   = (int) handles.state->load();
     const auto cabinetIndex = (int) handles.cabinet->load();
+    const auto lowCabIndex  = (int) handles.lowCab->load();
 
     // Split into segments the dry buffer can already hold. A host that hands over a bigger
     // block than it promised then costs an extra loop iteration instead of an allocation
@@ -162,8 +170,12 @@ void CollapseProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mi
             controls.weight  = smWeight.skip (len);
             controls.tone    = smTone  .skip (len);
             controls.grit    = smGrit  .skip (len);
+            controls.lowSub  = smLowSub .skip (len);
+            controls.lowBody = smLowBody.skip (len);
+            controls.lowTrim = smLowTrim.skip (len);
             controls.state   = stateIndex;
             controls.cabinet = cabinetIndex;
+            controls.lowCabinet = lowCabIndex;
 
             engine.setControls (controls);
 

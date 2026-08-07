@@ -34,7 +34,8 @@ void CollapseEngine::prepare (double newSampleRate, int numChannelsToUse, int ma
     oversampler.prepare (sampleRate >= 88200.0 ? 2 : 4, numChannels, maxBlock);
     osSampleRate = sampleRate * (double) oversampler.getFactor();
 
-    cab.prepare (sampleRate);
+    coherentCab .prepare (sampleRate);
+    collapsedCab.prepare (sampleRate);
 
     // Three stereo scratch bands, sized once, here, where allocating is allowed.
     buffers.assign ((std::size_t) (3 * 2 * maxBlock), 0.0f);
@@ -72,7 +73,8 @@ void CollapseEngine::prepare (double newSampleRate, int numChannelsToUse, int ma
 void CollapseEngine::reset() noexcept
 {
     oversampler.reset();
-    cab.reset();
+    coherentCab.reset();
+    collapsedCab.reset();
     split.reset();
     lowDelay.reset();
     highDelay.reset();
@@ -81,6 +83,8 @@ void CollapseEngine::reset() noexcept
 
     inputHp.reset();
     preEmphasis.reset();
+    lowSubShelf.reset();
+    lowBodyBell.reset();
     toneLow.reset();
     toneHigh.reset();
     gritPeak.reset();
@@ -107,6 +111,7 @@ void CollapseEngine::reset() noexcept
     for (auto& e : powerEnv) e.reset();
 
     makeupCurrent = makeupTarget;
+    lowTrimCurrent = controls.lowTrim;
     coherence = 1.0f;
 }
 
@@ -119,9 +124,13 @@ void CollapseEngine::setControls (const Controls& c) noexcept
                     || std::abs (c.weight - controls.weight) > eps
                     || std::abs (c.tone   - controls.tone)   > eps
                     || std::abs (c.grit   - controls.grit)   > eps
+                    || std::abs (c.lowSub  - controls.lowSub)  > eps
+                    || std::abs (c.lowBody - controls.lowBody) > eps
+                    || std::abs (c.lowTrim - controls.lowTrim) > eps
                     || std::abs (c.splitHz - controls.splitHz) > 0.05f
-                    || c.state   != controls.state
-                    || c.cabinet != controls.cabinet;
+                    || c.state      != controls.state
+                    || c.cabinet    != controls.cabinet
+                    || c.lowCabinet != controls.lowCabinet;
 
     if (! moved)
         return;
@@ -184,6 +193,22 @@ void CollapseEngine::applyControls()
     interHpCoeffs.setHighpass (osSampleRate, spec.interHpHz, 0.70);
     interLpCoeffs.setLowpass  (osSampleRate, spec.interLpHz, 0.70);
 
+    // ---- the coherent band's own EQ, with no clipper anywhere near it -------------
+    // Sub is a shelf rather than a corner frequency: Weight already owns the subsonic
+    // filter on the sum, and two controls fighting over the same corner is how a plug-in
+    // ends up with a low end nobody can predict. 45 Hz puts the hinge under the low E, so
+    // this is the fundamental itself rather than the octave above it.
+    lowSubShelf.coeffs.setLowShelf (sampleRate, 45.0,
+                                    ((double) controls.lowSub - 0.5) * 2.0 * 6.0, 0.70);
+
+    // Body tracks the crossover because it has to: this band ends at Split, and a bell
+    // parked at a fixed frequency would be outside it for most of the knob's travel. At
+    // 0.72 of the corner it sits where the note's weight is and still inside the band,
+    // and the clamp keeps it musical at both ends of a range that spans five octaves.
+    const auto bodyHz = std::min (320.0, std::max (45.0, 0.72 * (double) controls.splitHz));
+    lowBodyBell.coeffs.setPeak (sampleRate, bodyHz,
+                                ((double) controls.lowBody - 0.5) * 2.0 * 6.0, 0.90);
+
     // Tone is a tilt: one control, no way to end up with an unusable curve. Hinged low,
     // at 380 Hz, because on a bass the interesting argument is between the body of the
     // note and the string, not between mid and treble.
@@ -215,7 +240,8 @@ void CollapseEngine::applyControls()
     weightShelf.coeffs.setLowShelf (sampleRate, 92.0,
                                     ((double) controls.weight - 0.5) * 2.0 * 4.5, 0.75);
 
-    cab.setMode ((Cabinet) controls.cabinet);
+    coherentCab .setMode ((Cabinet) controls.lowCabinet);
+    collapsedCab.setMode ((Cabinet) controls.cabinet);
 
     // Makeup is interpolated between the five measured breakpoints in the spec.
     const auto pos   = std::min (3.999f, std::max (0.0f, d) * 4.0f);
@@ -409,10 +435,21 @@ void CollapseEngine::process (float* const* io, int numSamples) noexcept
     lowDelay .process (low,  low,  numSamples);
     highDelay.process (high, high, numSamples);
 
+    // ---- the coherent band's EQ, base rate, nothing non-linear in sight ------------
+    for (int ch = 0; ch < numChannels; ++ch)
+    {
+        auto* l = low[ch];
+
+        for (int n = 0; n < numSamples; ++n)
+            l[n] = lowBodyBell.process (ch, lowSubShelf.process (ch, l[n]));
+    }
+
     // ---- the sum ------------------------------------------------------------------
-    // Makeup is ramped across the block rather than stepped, because it is the one value
-    // derived from `drive` that is applied as a raw multiply.
+    // Makeup and the coherent trim are ramped across the block rather than stepped: they
+    // are the two values applied as a raw multiply, and a raw multiply stepped once per
+    // control block is a staircase on a knob somebody is dragging.
     const auto makeupStep = (makeupTarget - makeupCurrent) / (float) numSamples;
+    const auto trimStep   = (controls.lowTrim - lowTrimCurrent) / (float) numSamples;
     const auto blend = controls.blend;
     auto peak = 0.0f;
     auto lowSum = 0.0f, totalSum = 0.0f;
@@ -421,18 +458,21 @@ void CollapseEngine::process (float* const* io, int numSamples) noexcept
     {
         auto* out = io[ch];
         auto makeup = makeupCurrent;
+        auto trim   = lowTrimCurrent;
 
         for (int n = 0; n < numSamples; ++n)
         {
             makeup += makeupStep;
+            trim   += trimStep;
 
-            const auto lo = low[ch][n];
-            auto y = lo + (1.0f - blend) * high[ch][n] + blend * makeup * dirty[ch][n];
+            // One speaker per path, each fed only its own band. The cone model in front of
+            // each is level dependent, and the coherent one is where the low end that
+            // actually moves a cone has been all along.
+            const auto lo = coherentCab.process (ch, trim * low[ch][n]);
+            const auto hi = collapsedCab.process (ch,
+                                (1.0f - blend) * high[ch][n] + blend * makeup * dirty[ch][n]);
 
-            // One cabinet, at the end, fed by everything - both bands, clean and
-            // collapsed. The cone model in front of it is level dependent, so this is also
-            // the only position where it sees the low end that actually moves a cone.
-            y = cab.process (ch, y);
+            auto y = lo + hi;
 
             y = weightSub  .process (ch, y);
             y = weightShelf.process (ch, y);
@@ -453,7 +493,8 @@ void CollapseEngine::process (float* const* io, int numSamples) noexcept
         }
     }
 
-    makeupCurrent = makeupTarget;
+    makeupCurrent  = makeupTarget;
+    lowTrimCurrent = controls.lowTrim;
 
     const auto scale = invChannels / (float) std::max (1, numSamples);
     const auto lowLevel   = lowEnergyEnv  .process (lowSum   * scale);

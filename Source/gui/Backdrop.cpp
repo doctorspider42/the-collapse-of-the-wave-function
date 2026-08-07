@@ -176,13 +176,15 @@ void Backdrop::paintScene (juce::Graphics& g) const
     // ---- section frames -----------------------------------------------------
     for (const auto& s : sections)
     {
-        skin::drawSectionFrame (g, s.bounds, palette.accent);
+        const auto accent = s.tint.isTransparent() ? palette.accent : s.tint;
+
+        skin::drawSectionFrame (g, s.bounds, accent);
 
         if (s.title.isNotEmpty())
         {
             auto label = s.bounds.withHeight (20.0f).translated (0.0f, 7.0f)
                                  .reduced (13.0f, 0.0f);
-            skin::drawSectionTitle (g, s.title, label, palette.accent);
+            skin::drawSectionTitle (g, s.title, label, accent);
         }
     }
 

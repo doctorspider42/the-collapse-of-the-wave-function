@@ -21,19 +21,32 @@
 namespace collapse
 {
 
-/** Every parameter ID in one place. Seven knobs and two selectors: enough to voice the
-    thing, few enough that every one of them is worth reaching for. */
+/** Every parameter ID in one place, grouped the way the panel is: what belongs to the
+    coherent band, what belongs to the collapsed one, and the three that belong to both.
+
+    `cabinet` keeps its old ID even though it now only owns the collapsed path's speaker.
+    It is the one every session saved before the split carries, and renaming it would
+    silently reset that speaker to its default in every one of them. */
 namespace pid
 {
+    // The band below Split: never driven, its own EQ, its own speaker.
+    inline constexpr auto lowSub  = "lowsub";
+    inline constexpr auto lowBody = "lowbody";
+    inline constexpr auto lowTrim = "lowtrim";
+    inline constexpr auto lowCab  = "lowcab";
+
+    // The band above it, and what happens to it.
     inline constexpr auto drive   = "drive";
     inline constexpr auto blend   = "blend";
-    inline constexpr auto split   = "split";
-    inline constexpr auto weight  = "weight";
     inline constexpr auto tone    = "tone";
     inline constexpr auto grit    = "grit";
-    inline constexpr auto level   = "level";
     inline constexpr auto state   = "state";
     inline constexpr auto cabinet = "cabinet";
+
+    // Shared: where the two bands meet, and what happens after they are back together.
+    inline constexpr auto split   = "split";
+    inline constexpr auto weight  = "weight";
+    inline constexpr auto level   = "level";
     inline constexpr auto bypass  = "bypass";
 }
 
@@ -48,15 +61,21 @@ struct ParameterHandles
 {
     void attach (juce::AudioProcessorValueTreeState& state);
 
+    std::atomic<float>* lowSub  = nullptr;
+    std::atomic<float>* lowBody = nullptr;
+    std::atomic<float>* lowTrim = nullptr;
+    std::atomic<float>* lowCab  = nullptr;
+
     std::atomic<float>* drive   = nullptr;
     std::atomic<float>* blend   = nullptr;
-    std::atomic<float>* split   = nullptr;
-    std::atomic<float>* weight  = nullptr;
     std::atomic<float>* tone    = nullptr;
     std::atomic<float>* grit    = nullptr;
-    std::atomic<float>* level   = nullptr;
     std::atomic<float>* state   = nullptr;
     std::atomic<float>* cabinet = nullptr;
+
+    std::atomic<float>* split   = nullptr;
+    std::atomic<float>* weight  = nullptr;
+    std::atomic<float>* level   = nullptr;
     std::atomic<float>* bypass  = nullptr;
 
     juce::AudioParameterBool* bypassParameter = nullptr;

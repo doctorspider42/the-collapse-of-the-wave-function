@@ -25,16 +25,28 @@ namespace
 {
     constexpr float kMargin      = 22.0f;
     constexpr float kHeaderY     = 14.0f,  kHeaderH   = 34.0f;
-    constexpr float kWaveY       = 58.0f,  kWaveH     = 192.0f;
-    constexpr float kSelectorY   = 262.0f, kSelectorH = 84.0f;
-    constexpr float kRowY        = 358.0f, kRowH      = 168.0f;
-    constexpr float kFooterY     = 536.0f, kFooterH   = 22.0f;
+    constexpr float kWaveY       = 58.0f,  kWaveH     = 164.0f;
+
+    // The two paths, side by side. The collapsed column is wider because it has four knobs
+    // and two selectors to the coherent one's three and one - which is the panel saying
+    // what the signal path says: one of these is a channel, the other is an amplifier.
+    constexpr float kColumnY     = 234.0f, kColumnH   = 312.0f;
+    constexpr float kCoherentW   = 336.0f;
+    constexpr float kRowAY       = 272.0f;   // State, and the band readout opposite it
+    constexpr float kRowBY       = 344.0f;   // one speaker each, at the same height
+    constexpr float kKnobRowY    = 414.0f;
+    constexpr float kPillsH      = 48.0f;
+    constexpr float kSelectorCaptionH = 14.0f;
+
+    constexpr float kBottomY     = 558.0f, kBottomH   = 168.0f;
+    constexpr float kSplitW      = 296.0f;
 
     constexpr float kSectionTitleH = 30.0f;
     constexpr float kKnobWidth  = 88.0f;
     constexpr float kKnobHeight = 104.0f;
     constexpr float kKnobDial   = 72.0f;
     constexpr float kGap        = 12.0f;
+    constexpr float kKnobGap    = 16.0f;
 
     juce::String versionText()
     {
@@ -192,6 +204,36 @@ void CollapseEditor::PresetBar::paint (juce::Graphics& g)
 }
 
 // ---------------------------------------------------------------------------------
+//  Band readout
+// ---------------------------------------------------------------------------------
+
+void CollapseEditor::BandReadout::setSplitHz (float hz)
+{
+    if (std::abs (hz - splitHz) < 0.5f)
+        return;
+
+    splitHz = hz;
+    repaint();
+}
+
+void CollapseEditor::BandReadout::paint (juce::Graphics& g)
+{
+    auto area = getLocalBounds().toFloat();
+    auto figure = area.removeFromTop (area.getHeight() * 0.60f);
+
+    const auto range = "20 " + skin::u8 ("\xe2\x80\x93") + " "
+                         + juce::String (juce::roundToInt (splitHz)) + " Hz";
+
+    g.setFont (skin::displayFont (17.0f));
+    g.setColour (skin::colour::cold.withAlpha (0.86f));
+    g.drawText (range, figure, juce::Justification::centred, false);
+
+    skin::drawTracked (g, "NEVER DRIVEN, WHATEVER DRIVE IS DOING", skin::labelFont (8.5f),
+                       area, juce::Justification::centred,
+                       skin::colour::textFaint.withAlpha (0.95f), 0.9f);
+}
+
+// ---------------------------------------------------------------------------------
 //  Editor
 // ---------------------------------------------------------------------------------
 
@@ -204,27 +246,39 @@ CollapseEditor::CollapseEditor (CollapseProcessor& p)
     content.addAndMakeVisible (backdrop);
     content.addAndMakeVisible (wave);
 
-    struct KnobSpec { const char* id; const char* caption; const char* tip; bool bipolar; };
+    struct KnobSpec { const char* id; const char* caption; const char* tip; bool bipolar;
+                      bool coherent; };
 
     static const KnobSpec specs[kNumKnobs] =
     {
-        { pid::drive,  "Drive",
+        { pid::lowSub,  "Sub",
+          "The coherent band's bottom: a shelf at 45 Hz, under the low E. Nothing on this "
+          "path is in front of a clipper, so it stays where you put it.", true, true },
+        { pid::lowBody, "Body",
+          "A bell just under the crossover, where the weight of the note is. It follows "
+          "Split, so it is always inside the band it is shaping.", true, true },
+        { pid::lowTrim, "Trim",
+          "How much clean bass there is, -12 to +12 dB. Blend only ever moves the band "
+          "above Split, so this is the control that balances the two paths.", true, true },
+        { pid::drive,   "Drive",
           "How hard the gain stages are hit. Only the band above Split ever reaches them.",
-          false },
-        { pid::blend,  "Blend",
-          "Coherent to collapsed. The clean path is delay-matched, so this is a crossfade "
-          "rather than a comb filter.", false },
-        { pid::split,  "Split",
-          "The crossover. Everything below it stays clean no matter what Blend and Drive "
-          "are doing.", false },
-        { pid::weight, "Weight",
-          "The output low end: subsonic corner and a shelf at 92 Hz.", true },
-        { pid::tone,   "Tone",
-          "A tilt from dark to bright across the collapsed path.", true },
-        { pid::grit,   "Grit",
-          "Pick attack and fret noise, around 2.3 kHz, on the collapsed path.", false },
-        { pid::level,  "Level",
-          "Output trim, -18 to +18 dB.", true },
+          false, false },
+        { pid::blend,   "Blend",
+          "Coherent to collapsed, inside the band above Split. The clean path is "
+          "delay-matched, so this is a crossfade rather than a comb filter.", false, false },
+        { pid::tone,    "Tone",
+          "A tilt from dark to bright across the collapsed path.", true, false },
+        { pid::grit,    "Grit",
+          "Pick attack and fret noise, around 2.3 kHz, on the collapsed path.", false, false },
+        { pid::split,   "Split",
+          "The crossover, and the boundary between the two halves of this panel. "
+          "Everything below it stays clean no matter what Blend and Drive are doing.",
+          false, false },
+        { pid::weight,  "Weight",
+          "The output low end, after both speakers: subsonic corner and a shelf at 92 Hz.",
+          true, false },
+        { pid::level,   "Level",
+          "Output trim, -18 to +18 dB.", true, false },
     };
 
     for (int i = 0; i < kNumKnobs; ++i)
@@ -233,9 +287,11 @@ CollapseEditor::CollapseEditor (CollapseProcessor& p)
                                                         specs[i].caption, specs[i].tip,
                                                         specs[i].bipolar);
         knobs[i]->setKnobDiameter (kKnobDial);
-        knobs[i]->setPalette (&palette);
+        knobs[i]->setPalette (specs[i].coherent ? &coldPalette : &palette);
         content.addAndMakeVisible (*knobs[i]);
     }
+
+    content.addAndMakeVisible (bandReadout);
 
     stateSelector = std::make_unique<gui::StateSelector> (
         processor.getState(), pid::state, stateNames(),
@@ -250,14 +306,25 @@ CollapseEditor::CollapseEditor (CollapseProcessor& p)
     stateSelector->setPalette (&palette);
     content.addAndMakeVisible (*stateSelector);
 
+    const juce::StringArray cabinetCaptions { "no speaker - straight out",
+                                              "warmer cone, lower port, gives way earlier",
+                                              "stiffer cone, higher port, stays tight" };
+
     cabinetSelector = std::make_unique<gui::StateSelector> (
         processor.getState(), pid::cabinet, cabinetNames(),
-        "Speaker and cabinet, after the sum - both bands go through it. Off is the DI.");
-    cabinetSelector->setCaptions ({ "no speaker - a straight DI out",
-                                    "warmer cone, lower port, gives way earlier",
-                                    "stiffer cone, higher port, stays tight" });
+        "The speaker the collapsed band goes through. Off leaves the drive path as a "
+        "pedal into the desk.");
+    cabinetSelector->setCaptions (cabinetCaptions);
     cabinetSelector->setPalette (&palette);
     content.addAndMakeVisible (*cabinetSelector);
+
+    lowCabSelector = std::make_unique<gui::StateSelector> (
+        processor.getState(), pid::lowCab, cabinetNames(),
+        "The speaker the coherent band goes through. Off is a straight DI under the amp, "
+        "which is the rig half the presets are named after.");
+    lowCabSelector->setCaptions (cabinetCaptions);
+    lowCabSelector->setPalette (&coldPalette);
+    content.addAndMakeVisible (*lowCabSelector);
 
     power = std::make_unique<gui::PowerToggle> (processor.getState(), pid::bypass);
     power->setPalette (&palette);
@@ -313,62 +380,72 @@ void CollapseEditor::layOutContent()
 
     wave.setBounds (juce::Rectangle<float> (left, kWaveY, width, kWaveH).toNearestInt());
 
-    // ---- the two selectors -------------------------------------------------
-    // State gets the wider box: four options with longer names, and it is the decision
-    // that changes the most.
-    const auto stateWidth = 500.0f;
-    const auto cabinetWidth = width - stateWidth - kGap;
+    // ---- the two paths -----------------------------------------------------
+    // One box each, and the frames are the two colours the rest of the panel already uses
+    // for them: cold for the band that is never driven, the State's accent for the one
+    // that is. Everything inside a frame belongs to that path and to nothing else.
+    const auto collapsedX = left + kCoherentW + kGap;
+    const auto collapsedW = width - kCoherentW - kGap;
 
     std::vector<gui::Section> sections;
-    sections.push_back ({ { left, kSelectorY, stateWidth, kSelectorH }, "STATE" });
-    sections.push_back ({ { left + stateWidth + kGap, kSelectorY, cabinetWidth, kSelectorH },
-                          "CABINET" });
+    sections.push_back ({ { left, kColumnY, kCoherentW, kColumnH }, "COHERENT",
+                          skin::colour::cold });
+    sections.push_back ({ { collapsedX, kColumnY, collapsedW, kColumnH }, "COLLAPSED" });
 
-    const auto pillsY = kSelectorY + kSectionTitleH;
-    const auto pillsH = 48.0f;
+    const auto pillsAndCaption = kPillsH + kSelectorCaptionH;
 
-    stateSelector->setBounds (juce::Rectangle<float> (left + 16.0f, pillsY,
-                                                      stateWidth - 32.0f, pillsH)
+    bandReadout.setBounds (juce::Rectangle<float> (left + 16.0f, kRowAY,
+                                                   kCoherentW - 32.0f, pillsAndCaption)
+                               .toNearestInt());
+
+    stateSelector->setBounds (juce::Rectangle<float> (collapsedX + 16.0f, kRowAY,
+                                                      collapsedW - 32.0f, pillsAndCaption)
                                   .toNearestInt());
-    cabinetSelector->setBounds (juce::Rectangle<float> (left + stateWidth + kGap + 16.0f,
-                                                        pillsY, cabinetWidth - 32.0f, pillsH)
+
+    // The two speakers sit at the same height on purpose: it is the same decision twice,
+    // and the panel should not make it look like two different kinds of thing.
+    lowCabSelector->setBounds (juce::Rectangle<float> (left + 16.0f, kRowBY,
+                                                       kCoherentW - 32.0f, pillsAndCaption)
+                                   .toNearestInt());
+    cabinetSelector->setBounds (juce::Rectangle<float> (collapsedX + 16.0f, kRowBY,
+                                                        collapsedW - 32.0f, pillsAndCaption)
                                     .toNearestInt());
 
-    // ---- the knob row ------------------------------------------------------
-    // Three pairs and the output trim. The order is the order of the signal path, left to
-    // right, which is the only ordering anybody has to be told once.
-    const auto outputWidth = 140.0f;
-    const auto pairWidth = (width - outputWidth - 3.0f * kGap) / 3.0f;
+    // ---- every knob, in the box it belongs to -------------------------------
+    // Left to right is the order of the signal path within each box, and the boxes
+    // themselves are in the order the signal reaches them.
+    struct Group { juce::Rectangle<float> bounds; const char* title; int first, count; };
 
-    struct Group { const char* title; int first, count; };
-    static const Group groups[] =
+    const Group groups[] =
     {
-        { "SUPERPOSITION", 2, 2 },   // Split, Weight
-        { "COLLAPSE",      0, 2 },   // Drive, Blend
-        { "OBSERVATION",   4, 2 },   // Tone, Grit
-        { "OUTPUT",        6, 1 },   // Level
+        { { left, kKnobRowY, kCoherentW, kKnobHeight },       nullptr, lowSub, 3 },
+        { { collapsedX, kKnobRowY, collapsedW, kKnobHeight }, nullptr, drive,  4 },
+        { { left, kBottomY, kSplitW, kBottomH },         "CROSSOVER", split,  1 },
+        { { left + kSplitW + kGap, kBottomY, width - kSplitW - kGap, kBottomH },
+          "OUTPUT", weight, 2 },
     };
-
-    auto x = left;
 
     for (const auto& group : groups)
     {
-        const auto w = group.count > 1 ? pairWidth : outputWidth;
-        sections.push_back ({ { x, kRowY, w, kRowH }, group.title });
+        if (group.title != nullptr)
+            sections.push_back ({ group.bounds, group.title });
 
         const auto span = (float) group.count * kKnobWidth
-                            + (float) (group.count - 1) * 16.0f;
-        auto knobX = x + (w - span) * 0.5f;
-        const auto knobY = kRowY + kSectionTitleH + 6.0f;
+                            + (float) (group.count - 1) * kKnobGap;
+        auto knobX = group.bounds.getCentreX() - span * 0.5f;
+
+        // A knob row inside its own section starts under the title; the two path columns
+        // have already spent that space on selectors.
+        const auto knobY = group.title != nullptr
+                             ? group.bounds.getY() + kSectionTitleH + 6.0f
+                             : group.bounds.getY();
 
         for (int i = 0; i < group.count; ++i)
         {
             knobs[group.first + i]->setBounds (
                 juce::Rectangle<float> (knobX, knobY, kKnobWidth, kKnobHeight).toNearestInt());
-            knobX += kKnobWidth + 16.0f;
+            knobX += kKnobWidth + kKnobGap;
         }
-
-        x += w + kGap;
     }
 
     backdrop.setSections (std::move (sections));
@@ -393,6 +470,7 @@ void CollapseEditor::pushPalette (bool force)
         backdrop.setPalette (palette);
         stateSelector->repaint();
         cabinetSelector->repaint();
+        lowCabSelector->repaint();
         presetBar->repaint();
         power->repaint();
 
@@ -421,19 +499,23 @@ void CollapseEditor::timerCallback()
 {
     auto& state = processor.getState();
 
-    const auto drive = state.getRawParameterValue (pid::drive)->load() * 0.01f;
-    const auto blend = state.getRawParameterValue (pid::blend)->load() * 0.01f;
+    const auto driveAmount = state.getRawParameterValue (pid::drive)->load() * 0.01f;
+    const auto blendAmount = state.getRawParameterValue (pid::blend)->load() * 0.01f;
     const auto active = power->isActive();
 
-    smoothedHeat += 0.20f * (drive - smoothedHeat);
+    smoothedHeat += 0.20f * (driveAmount - smoothedHeat);
     pushPalette (false);
+
+    // The readout is the coherent column's title bar, in effect, so it follows the
+    // crossover rather than waiting for a repaint of the panel.
+    bandReadout.setSplitHz (state.getRawParameterValue (pid::split)->load());
 
     // Bypassed, the picture goes still and coherent rather than freezing mid-collapse:
     // it is showing what the plug-in is doing, and it is not doing anything.
     wave.setPalette (palette);
     wave.setEnergy (active ? processor.getLevel() : 0.0f,
                     active ? processor.getCollapse() : 0.0f,
-                    active ? blend : 0.0f,
+                    active ? blendAmount : 0.0f,
                     active ? processor.getCoherence() : 1.0f);
 }
 

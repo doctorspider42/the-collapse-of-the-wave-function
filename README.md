@@ -1,13 +1,15 @@
 # The Collapse of The Wave Function
 
 A bass amp that can be pushed a very long way without the note falling out from under it.
-The bottom of the instrument is taken out of the drive path by a crossover, driven
-nowhere, and put back before the speaker — so Drive and Blend can go where they like and a
-low E arrives at the level it left at.
+The bottom of the instrument is taken out of the drive path by a crossover and handed to a
+channel of its own — its own EQ, its own speaker, no gain stage anywhere near it — so Drive
+and Blend can go where they like and a low E arrives at the level it left at.
 
-Preamp, four drive voicings, a two-band split with a delay-matched blend, output EQ and a
-speaker, in that order. It is meant to be the whole chain: plug a bass in, pick a preset,
-and the only thing still missing is a reverb.
+One crossover and then two complete amplifiers. The panel is two columns because the
+signal path is: **coherent** on the left, cold, everything below the split; **collapsed**
+on the right, four drive voicings and a delay-matched blend, everything above it. Each has
+its own speaker, and they do not have to agree — a fuzz through a 4×12 over a bass that
+goes straight to the desk is the rig half the presets are named after.
 
 VST3 and standalone, Linux and Windows.
 
@@ -15,10 +17,11 @@ VST3 and standalone, Linux and Windows.
 
 ![Collapse, fully observed](docs/panel-observed.png)
 
-The picture in the middle is the plug-in telling you what it is doing. A superposition of
+The picture at the top is the plug-in telling you what it is doing. A superposition of
 standing modes while the signal is coherent; localised packets, and a row of spikes in the
 probability strip along the floor, once the drive path has been observed. The cold ribbon
-underneath is the band that never enters the drive path at all.
+underneath is the band that never enters the drive path at all — the one the left-hand
+column owns.
 
 ## Why the split
 
@@ -31,12 +34,13 @@ collapsed, once with the Collapse voicing at full Drive and full Blend:
 
 | | What the fuzz costs the fundamental |
 |---|---|
-| **Split at 150 Hz** | **−0.01 dB** |
-| Split at 20 Hz (no split) | −16.6 dB |
+| **Split at 150 Hz** | **+0.02 dB** |
+| Split at 20 Hz (no split) | −16.9 dB |
 
-A difference and not an absolute figure, deliberately: the cabinet is after the sum, and a
-real 4×10 does not pass 41 Hz at unity, so an absolute number would be scoring the speaker
-rather than the crossover. Both come out of `devtool check`, which runs on every build.
+A difference and not an absolute figure, deliberately: both measurements are taken through
+a speaker, and a real 4×10 does not pass 41 Hz at unity, so an absolute number would be
+scoring the cabinet rather than the crossover. Both come out of `devtool check`, which runs
+on every build.
 
 Taking the low band away in front of the clipper is only half of it. Whatever residual
 gets through is then handed up to 92 dB of gain, saturates, and comes back out as a
@@ -47,17 +51,35 @@ out. Both filters are why the first number above is what it is.
 
 ## Controls
 
+### Coherent — the band below Split
+
+Nothing on this side is in front of a clipper, so nothing on it changes when Drive moves.
+
 | Control | What it does |
 |---|---|
-| **Split** | The crossover, 20 Hz to 800 Hz. Everything below it stays clean no matter what Drive and Blend are doing. At 20 Hz there is effectively no low band and Blend becomes a plain parallel mix. |
-| **Weight** | The output low end: the subsonic corner from 40 Hz down to 16 Hz, and a shelf at 92 Hz. Acts on the sum, so it still does something with the crossover parked at the bottom. |
+| **Sub** | A shelf at 45 Hz, ±6 dB — under the low E, so this is the fundamental itself rather than the octave above it. |
+| **Body** | A bell of ±6 dB where the weight of the note is. It sits at 0.72 of the crossover and follows it, so it is always inside the band it is shaping. |
+| **Trim** | How much clean bass there is, ±12 dB. Blend only ever moves the band *above* Split, so this is the control that balances the two channels against each other. |
+| **Speaker** | Off, Cone or Steel, for this band alone. Off is a straight DI under whatever the amp is doing. |
+
+### Collapsed — the band above it
+
+| Control | What it does |
+|---|---|
+| **State** | Four voicings for the drive path, below. |
 | **Drive** | How hard the gain stages are hit. Only the band above Split ever reaches them. |
-| **Blend** | Coherent to collapsed. The clean path is delayed by exactly the latency the oversampler reports, so this is a crossfade and not a comb filter. |
+| **Blend** | Coherent to collapsed, inside this band. The clean path is delayed by exactly the latency the oversampler reports, so this is a crossfade and not a comb filter. |
 | **Tone** | A tilt from dark to bright across the collapsed path, hinged at 380 Hz. |
 | **Grit** | Pick attack and fret noise, a narrow band around 2.3 kHz. Its zero is at 35 %, so most of the travel adds. |
+| **Speaker** | Off, Cone or Steel, for this band alone. It sits after the blend, so it is a speaker on the whole channel and not only on the dirty half of it. |
+
+### Both
+
+| Control | What it does |
+|---|---|
+| **Split** | The crossover, 20 Hz to 800 Hz, and the boundary between the two halves of the panel. At 20 Hz there is effectively no coherent band, its controls stop doing anything, and Blend becomes a plain parallel mix. |
+| **Weight** | The output low end, after both speakers: the subsonic corner from 40 Hz down to 16 Hz, and a shelf at 92 Hz. Acts on the sum, so it still does something with the crossover parked at the bottom. |
 | **Level** | Output trim, ±18 dB. |
-| **State** | Four voicings for the drive path, below. |
-| **Cabinet** | Off, Cone or Steel. Sits after the sum, so it colours both bands — this is the amp, not a speaker on the dirty channel. Off is a straight DI. |
 
 ### The four states
 
@@ -74,7 +96,7 @@ Collapse is deliberately left about 1.3 dB high in its last quarter: the top of 
 is meant to be another gear, and a gear exactly as loud as the one below it does not feel
 like one. The numbers behind that come from `devtool sweep`.
 
-### The cabinet
+### The speakers
 
 Both cabinets are measured impulse responses from the midrange up, and a model below it.
 
@@ -90,14 +112,25 @@ In front of the linear part sits a level-dependent cone: excursion compresses th
 voice-coil heating pulls sustained level down, both driven from a low-passed displacement
 signal so the non-linearity cannot generate anything high enough to alias.
 
-The cabinet sits **after the sum**, so both bands go through it. A real rig has one
-cabinet at the end of it, not one per band, and anywhere else makes this a drive pedal
-that still needs an amp after it rather than the whole chain. It also puts the actual low
-end into the cone model, which matters more than it sounds: excursion compression is a
-low-frequency phenomenon, and before this there was barely any low frequency reaching it.
+There is **one of them per path**, and each is switched separately.
 
-The thing to know: with a cabinet selected, **Blend at 0 is a bass amp, not a clean DI**.
-Cabinet: Off is the DI.
+Two cabinets set the same way are not a detour. The measured part of a cabinet is a linear
+filter, and filtering two bands separately and summing them is the same as filtering the
+sum — so agreeing costs nothing and sounds like the single speaker this replaced.
+Disagreeing is the point. The setting most sessions want is a speaker on the drive channel
+and **Off** under it: the low end goes to the desk with the transient intact, the growl
+comes off a 4×12, and both of them are still one instrument because they were one signal
+one crossover ago.
+
+It also puts each cone model in front of the band it is supposed to be moving. Excursion
+compression is a low-frequency phenomenon, and it now belongs to the path that has the low
+frequencies rather than to a sum where it was competing with a fuzz.
+
+The thing to know: with a speaker selected on the collapsed path, **Blend at 0 is a bass
+amp, not a clean DI**. Both speakers Off is the DI.
+
+The cost is one convolution per active speaker: 8.3 % of one core at 48 kHz with neither,
+16.6 % with both, measured by `devtool check` on the machine it was built on.
 
 ## What it does not claim
 
@@ -147,15 +180,15 @@ audio device and no display, and runs in about a minute:
 ./build/CollapseDevTool_artefacts/Release/CollapseDevTool check
 ```
 
-It asserts that the crossover sums flat, that the cabinet colours the clean path and not
-only the collapsed one, that the fundamental survives full Collapse fuzz and that it does
-not without the split, that the cabinet still passes a low E at a usable level, that every
-one of the nine controls changes the output, that bypass nulls against the reported
-latency, that silence stays silent through two asymmetric shapers and a squaring term, that
-nothing goes unbounded or non-finite at any setting, that the cabinets are level-matched
-and keep their bottom octave, that aliasing stays below −45 dB at full drive, and that
-switching state, cabinet, crossover and sample rate mid-stream stays finite. It then prints
-the CPU cost.
+It asserts that the crossover sums flat, that each speaker colours its own band and
+nothing on the other side of the split, that the fundamental survives full Collapse fuzz
+and that it does not without the split, that a low E still arrives at a usable level, that
+every one of the thirteen controls changes the output, that bypass nulls against the
+reported latency, that silence stays silent through two asymmetric shapers and a squaring
+term, that nothing goes unbounded or non-finite at any setting, that the cabinets are
+level-matched and that both paths keep their bottom octave through one, that aliasing stays
+below −45 dB at full drive, and that switching state, either cabinet, the crossover and the
+sample rate mid-stream stays finite. It then prints the CPU cost.
 
 CI runs the same binary on Linux and Windows, renders the panel headlessly, and puts
 pluginval at strictness 8 over the VST3 before anything is published.

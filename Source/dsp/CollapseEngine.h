@@ -28,23 +28,29 @@
 namespace collapse::dsp
 {
 
-/** The whole signal path.
+/** The whole signal path: one crossover and then two complete amplifiers.
 
-                             +--- low band ------------------------------+
-        in -> LR4 split -----+                                            +-> cabinet
-                             +--- high band -+-- (1 - Blend) ------------+   -> Weight
-                                             |                           |   -> ceiling
-                                             +-- pre-EQ -> [oversampled  |
-                                                 2-3 asymmetric stages,  |
-                                                 sag, push-pull, octave] |
-                                                 -> tone -> grit -> HP --+-- Blend
+                        +-- COHERENT --- Sub -> Body -> Trim -> speaker A --+
+        in -> LR4 split +                                                    + -> Weight
+                        +-- COLLAPSED -+-- (1 - Blend) ------------+         |    -> ceiling
+                                       |                           +- speaker B
+                                       +-- pre-EQ -> [oversampled  |
+                                           2-3 asymmetric stages,  |
+                                           sag, push-pull, octave] |
+                                           -> tone -> grit -> HP --+-- Blend
 
-    Four things about that diagram are the whole design.
+    Five things about that diagram are the whole design.
 
     **The low band never enters the drive path.** Distortion of two low fundamentals
     produces sum and difference tones between them, and on a bass those land right in the
     middle of the note. Splitting first is why this can be driven hard and still be a
     bass rather than a buzz.
+
+    **The coherent band is a channel, not a leftover.** It has its own EQ - a subsonic
+    shelf, a bell that tracks the crossover, and a trim - and none of it is in front of a
+    clipper, so it is the only tone shaping here that cannot change with Drive. Blend only
+    ever crossfades inside the band above Split, so this trim is the one control that says
+    how much clean bass there is.
 
     **The clean high band is delayed, not merely mixed.** The oversampler reports an
     integer latency and both clean paths are held back by exactly that, so Blend is a
@@ -57,16 +63,18 @@ namespace collapse::dsp
     and subtracts from the clean band it was supposed to leave alone. Measured at -4.2 dB
     on a low E before this filter existed. It is the reason for `dirtyHpA/B`.
 
-    **The cabinet is after the sum, so both paths go through the speaker.** A real rig has
-    one cabinet at the end of it, not one per band, and putting it anywhere else makes this
-    a drive pedal that needs an amp after it rather than the whole chain. It also means the
-    cone model is driven by the actual low end rather than by whatever survived the
-    clipper - which is the half of speaker behaviour that matters most on a bass, because
-    excursion compression is a low-frequency phenomenon and there was barely any low
-    frequency reaching it before.
+    **One speaker per path, each of them switchable.** Two cabinets set the same way are
+    not a detour: the measured part of a cabinet is a linear filter, and filtering two
+    bands separately and summing is the same as filtering the sum, so agreeing costs
+    nothing and sounds like the single cabinet this replaced. Disagreeing is the point -
+    a fuzz through a 4x12 over a bass that goes straight to the desk is a rig people
+    actually build, and it needs the low band to have somewhere to go that is not the
+    speaker the fuzz is using. Each cabinet then sees only its own band, which is also
+    the honest way to drive the cone model: excursion compression is a low-frequency
+    phenomenon, and it now belongs to the path that has the low frequencies.
 
     The consequence to know about: with a cabinet selected, Blend at 0 is a bass amp rather
-    than a clean DI. Cabinet: Off is the DI.
+    than a clean DI. Both speakers off is the DI.
 
     No JUCE, no allocation outside prepare(), no locks. The maximum block passed to
     process() is fixed at prepare() time.
@@ -76,14 +84,23 @@ class CollapseEngine
 public:
     struct Controls
     {
+        // The coherent band, below Split.
+        float lowSub  = 0.50f;  // 0..1, subsonic shelf, bipolar around the middle
+        float lowBody = 0.50f;  // 0..1, a bell just under the crossover, bipolar
+        float lowTrim = 1.0f;   // linear gain, +-12 dB
+        int   lowCabinet = 1;   // Cabinet
+
+        // The collapsed band, above it.
         float drive  = 0.30f;   // 0..1
         float blend  = 0.55f;   // 0..1, coherent .. collapsed
-        float splitHz = 110.0f; // crossover; below this the signal is never distorted
-        float weight = 0.55f;   // 0..1, output low end
         float tone   = 0.50f;   // 0..1, dark .. bright, collapsed path only
         float grit   = 0.45f;   // 0..1, upper-mid bite, collapsed path only
         int   state   = 1;      // index into stateSpec()
         int   cabinet = 1;      // Cabinet
+
+        // Both, and after both.
+        float splitHz = 110.0f; // crossover; below this the signal is never distorted
+        float weight = 0.55f;   // 0..1, output low end
     };
 
     void prepare (double newSampleRate, int numChannelsToUse, int maxBlockToUse);
@@ -128,7 +145,7 @@ private:
     Controls controls {};
 
     Oversampler    oversampler;
-    CabSim         cab;
+    CabSim         coherentCab, collapsedCab;
     LinkwitzRiley4 split;
     IntegerDelay   lowDelay, highDelay;
 
@@ -136,6 +153,7 @@ private:
 
     DcBlocker dcIn[2], dcOut[2], octaveDc[2];
     Biquad<2> inputHp, preEmphasis;
+    Biquad<2> lowSubShelf, lowBodyBell;
     Biquad<2> toneLow, toneHigh, gritPeak, gritShelf;
     Biquad<2> dirtyHpA, dirtyHpB;
     Biquad<2> weightSub, weightShelf;
@@ -151,6 +169,7 @@ private:
     float stageGain[3]  = { 1.0f, 1.0f, 1.0f };
     float makeupTarget  = 1.0f;
     float makeupCurrent = 1.0f;
+    float lowTrimCurrent = 1.0f;
     float coherence     = 1.0f;
 };
 

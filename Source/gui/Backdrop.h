@@ -37,6 +37,11 @@ struct Section
 {
     juce::Rectangle<float> bounds;
     juce::String title;
+
+    /** A frame that follows a colour of its own rather than the State's. The coherent path
+        is drawn cold everywhere else on the panel, and a frame around it in the drive
+        path's accent would undo that in one stroke. Transparent means "use the palette". */
+    juce::Colour tint {};
 };
 
 class Backdrop final : public juce::Component
