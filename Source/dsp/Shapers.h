@@ -131,7 +131,7 @@ inline const StateSpec& stateSpec (int index) noexcept
           1.14f, 0.42f, 0.018f, 0.016f, 0.09f, 0.030f, 0.18f,
           190.0f, 2.0f, 0.60f,
           38.0f, 11000.0f, 0.20f, 0.00f,
-          { 2.1f, -3.9f, -9.0f, -12.1f, -13.4f }, 24.0f },
+          { 1.9f, -4.4f, -9.8f, -13.1f, -14.6f }, 24.0f },
 
         // PHASE - the workhorse. Enough asymmetry for a real second harmonic and a push
         // just above the fundamental range, so a low B still reads as a note rather than
@@ -142,7 +142,7 @@ inline const StateSpec& stateSpec (int index) noexcept
           1.52f, 0.50f, 0.050f, 0.032f, 0.15f, 0.060f, 0.30f,
           430.0f, 4.0f, 0.75f,
           58.0f, 8200.0f, 0.38f, 0.03f,
-          { 2.8f, -4.6f, -9.7f, -11.8f, -12.4f }, 38.0f },
+          { 2.6f, -5.2f, -10.6f, -12.8f, -13.5f }, 38.0f },
 
         // DECAY - three stages, a firmer input and a harder knee. This is where the
         // plug-in stops being an overdrive: percussive, mid-forward, and tight enough
@@ -153,7 +153,7 @@ inline const StateSpec& stateSpec (int index) noexcept
           1.36f, 0.26f, 0.028f, 0.048f, 0.20f, 0.105f, 0.44f,
           700.0f, 5.5f, 0.95f,
           82.0f, 6600.0f, 0.48f, 0.00f,
-          { 3.8f, -4.6f, -9.2f, -10.8f, -11.1f }, 52.0f },
+          { 3.6f, -5.1f, -10.0f, -11.7f, -12.0f }, 52.0f },
 
         // COLLAPSE - the state the plug-in is named for. Heavy asymmetry, a long knee and
         // a squaring term for the octave-up fizz. Squashy even at Drive 0, which is the
@@ -164,7 +164,7 @@ inline const StateSpec& stateSpec (int index) noexcept
           2.60f, 0.66f, 0.140f, 0.066f, 0.21f, 0.095f, 0.50f,
           520.0f, 5.0f, 0.60f,
           88.0f, 6000.0f, 0.55f, 0.26f,
-          { 8.4f, -2.3f, -6.4f, -7.7f, -7.7f }, 60.0f },
+          { 8.4f, -2.7f, -7.1f, -8.4f, -8.4f }, 60.0f },
     };
 
     const auto count = (int) (sizeof (specs) / sizeof (specs[0]));

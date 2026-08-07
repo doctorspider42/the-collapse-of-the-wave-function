@@ -1,9 +1,13 @@
 # The Collapse of The Wave Function
 
-A bass drive that can be pushed a very long way without the note falling out from under
-it. The bottom of the instrument is taken out of the drive path by a crossover, driven
-nowhere, and put back afterwards — so Drive and Blend can go where they like and a low E
-still arrives at the same level it left at.
+A bass amp that can be pushed a very long way without the note falling out from under it.
+The bottom of the instrument is taken out of the drive path by a crossover, driven
+nowhere, and put back before the speaker — so Drive and Blend can go where they like and a
+low E arrives at the level it left at.
+
+Preamp, four drive voicings, a two-band split with a delay-matched blend, output EQ and a
+speaker, in that order. It is meant to be the whole chain: plug a bass in, pick a preset,
+and the only thing still missing is a reverb.
 
 VST3 and standalone, Linux and Windows.
 
@@ -22,15 +26,17 @@ Distortion of two low fundamentals produces the sum and difference between them,
 bass those land in the middle of the note. Turn a fuzz up on a low E and the note does not
 get dirty, it gets *smaller*.
 
-So it is split first. Measured, with the crossover at 150 Hz and the Collapse voicing at
-full Drive and full Blend:
+So it is split first. Measured on a low E, through the same amp twice — once with nothing
+collapsed, once with the Collapse voicing at full Drive and full Blend:
 
-| | Fundamental of a low E |
+| | What the fuzz costs the fundamental |
 |---|---|
-| **Split at 150 Hz** | **−0.9 dB** |
-| Split at 20 Hz (no split) | −16.8 dB |
+| **Split at 150 Hz** | **−0.01 dB** |
+| Split at 20 Hz (no split) | −16.6 dB |
 
-Both numbers come out of `devtool check`, which runs on every build.
+A difference and not an absolute figure, deliberately: the cabinet is after the sum, and a
+real 4×10 does not pass 41 Hz at unity, so an absolute number would be scoring the speaker
+rather than the crossover. Both come out of `devtool check`, which runs on every build.
 
 Taking the low band away in front of the clipper is only half of it. Whatever residual
 gets through is then handed up to 92 dB of gain, saturates, and comes back out as a
@@ -51,7 +57,7 @@ out. Both filters are why the first number above is what it is.
 | **Grit** | Pick attack and fret noise, a narrow band around 2.3 kHz. Its zero is at 35 %, so most of the travel adds. |
 | **Level** | Output trim, ±18 dB. |
 | **State** | Four voicings for the drive path, below. |
-| **Cabinet** | Off, Cone or Steel — on the collapsed path only. |
+| **Cabinet** | Off, Cone or Steel. Sits after the sum, so it colours both bands — this is the amp, not a speaker on the dirty channel. Off is a straight DI. |
 
 ### The four states
 
@@ -84,9 +90,14 @@ In front of the linear part sits a level-dependent cone: excursion compresses th
 voice-coil heating pulls sustained level down, both driven from a low-passed displacement
 signal so the non-linearity cannot generate anything high enough to alias.
 
-The cabinet only ever sees the collapsed path. That is how the rig this imitates is
-wired — a DI holding the bottom, a driven amp holding the shape — and it means the
-modelled low end never has to fight the real one coming down the clean side.
+The cabinet sits **after the sum**, so both bands go through it. A real rig has one
+cabinet at the end of it, not one per band, and anywhere else makes this a drive pedal
+that still needs an amp after it rather than the whole chain. It also puts the actual low
+end into the cone model, which matters more than it sounds: excursion compression is a
+low-frequency phenomenon, and before this there was barely any low frequency reaching it.
+
+The thing to know: with a cabinet selected, **Blend at 0 is a bass amp, not a clean DI**.
+Cabinet: Off is the DI.
 
 ## What it does not claim
 
@@ -136,13 +147,15 @@ audio device and no display, and runs in about a minute:
 ./build/CollapseDevTool_artefacts/Release/CollapseDevTool check
 ```
 
-It asserts the crossover sums flat, that the fundamental survives full Collapse fuzz and
-that it does not without the split, that every one of the nine controls changes the output,
-that bypass nulls against the reported latency, that silence stays silent through two
-asymmetric shapers and a squaring term, that nothing goes unbounded or non-finite at any
-setting, that the cabinets are level-matched and keep their bottom octave, that aliasing
-stays below −45 dB at full drive, and that switching state, cabinet, crossover and sample
-rate mid-stream stays finite. It then prints the CPU cost.
+It asserts that the crossover sums flat, that the cabinet colours the clean path and not
+only the collapsed one, that the fundamental survives full Collapse fuzz and that it does
+not without the split, that the cabinet still passes a low E at a usable level, that every
+one of the nine controls changes the output, that bypass nulls against the reported
+latency, that silence stays silent through two asymmetric shapers and a squaring term, that
+nothing goes unbounded or non-finite at any setting, that the cabinets are level-matched
+and keep their bottom octave, that aliasing stays below −45 dB at full drive, and that
+switching state, cabinet, crossover and sample rate mid-stream stays finite. It then prints
+the CPU cost.
 
 CI runs the same binary on Linux and Windows, renders the panel headlessly, and puts
 pluginval at strictness 8 over the VST3 before anything is published.

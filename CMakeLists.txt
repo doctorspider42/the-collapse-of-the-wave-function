@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(Collapse
-    VERSION 1.0.0
+    VERSION 1.1.0
     DESCRIPTION "The Collapse of The Wave Function - bass drive, blend and cabinet"
     LANGUAGES C CXX)
 

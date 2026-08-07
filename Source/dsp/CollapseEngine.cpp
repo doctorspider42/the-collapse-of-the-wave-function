@@ -383,7 +383,7 @@ void CollapseEngine::process (float* const* io, int numSamples) noexcept
 
     oversampler.downsample (dirty, numSamples);
 
-    // ---- post EQ and cabinet on the collapsed path, base rate ---------------------
+    // ---- post EQ on the collapsed path, base rate ---------------------------------
     for (int ch = 0; ch < numChannels; ++ch)
     {
         auto* d = dirty[ch];
@@ -396,11 +396,9 @@ void CollapseEngine::process (float* const* io, int numSamples) noexcept
             y = toneHigh .process (ch, y);
             y = gritPeak .process (ch, y);
             y = gritShelf.process (ch, y);
-            y = cab      .process (ch, y);
 
-            // Last, after the cabinet: the cone model and the modelled port are two more
-            // ways to put energy back under the crossover, and this has to be the thing
-            // nothing gets past.
+            // Last thing on this path, and it has to be: everything upstream of it is a
+            // way to put energy back under the crossover that the clean band is holding.
             y = dirtyHpB.process (ch, dirtyHpA.process (ch, y));
 
             d[n] = y;
@@ -430,6 +428,11 @@ void CollapseEngine::process (float* const* io, int numSamples) noexcept
 
             const auto lo = low[ch][n];
             auto y = lo + (1.0f - blend) * high[ch][n] + blend * makeup * dirty[ch][n];
+
+            // One cabinet, at the end, fed by everything - both bands, clean and
+            // collapsed. The cone model in front of it is level dependent, so this is also
+            // the only position where it sees the low end that actually moves a cone.
+            y = cab.process (ch, y);
 
             y = weightSub  .process (ch, y);
             y = weightShelf.process (ch, y);

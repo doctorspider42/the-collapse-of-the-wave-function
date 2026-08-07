@@ -252,8 +252,8 @@ CollapseEditor::CollapseEditor (CollapseProcessor& p)
 
     cabinetSelector = std::make_unique<gui::StateSelector> (
         processor.getState(), pid::cabinet, cabinetNames(),
-        "Speaker and cabinet on the collapsed path only - the clean side keeps its bottom.");
-    cabinetSelector->setCaptions ({ "no speaker - straight out of the stages",
+        "Speaker and cabinet, after the sum - both bands go through it. Off is the DI.");
+    cabinetSelector->setCaptions ({ "no speaker - a straight DI out",
                                     "warmer cone, lower port, gives way earlier",
                                     "stiffer cone, higher port, stays tight" });
     cabinetSelector->setPalette (&palette);

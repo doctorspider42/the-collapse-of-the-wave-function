@@ -279,65 +279,83 @@ int runCheck()
         expect (worst < 0.8f, "the crossover sums flat when nothing is collapsed");
     }
 
+    // ---- 1b. the cabinet is on the clean path too ----------------------------
+    // The cabinet sits after the sum, so it colours both bands whatever Blend is doing -
+    // which is what makes this an amp rather than a drive pedal that still needs one. With
+    // the cabinet in front of the sum instead, this check reads zero at every frequency.
+    {
+        auto responseWithCabinet = [&proc] (int cabinetIndex, double freq)
+        {
+            neutral (proc);
+            setParam (proc, blend, 0.0f);       // nothing collapsed at all
+            setParam (proc, cabinet, (float) cabinetIndex);
+            return responseAtDb (proc, freq);
+        };
+
+        auto worst = 0.0f;
+        const double points[] = { 55, 120, 400, 1500, 3500 };
+
+        for (auto f : points)
+            worst = juce::jmax (worst, std::abs (responseWithCabinet (1, f)
+                                                     - responseWithCabinet (0, f)));
+
+        std::cout << "  Cone against Off at Blend 0, worst of five bands: "
+                  << juce::String (worst, 2) << " dB" << std::endl;
+        expect (worst > 3.0f, "the cabinet colours the clean path, not only the collapsed one");
+    }
+
     // ---- 2. the whole point of the plug-in -----------------------------------
-    // A low E, fully collapsed, full drive, split above the fundamental. If the crossover
-    // is doing its job the fundamental comes out at the level it went in at, whatever is
-    // happening to everything above it.
+    // A low E through the same amp twice: once with nothing collapsed, once with the most
+    // destructive voicing at full drive. Measured as a difference rather than against the
+    // input, because the cabinet now sits after the sum and a real 4x10 does not pass
+    // 41 Hz at unity - so an absolute figure would be scoring the speaker, not the
+    // crossover. What the split promises is that turning the fuzz on costs the fundamental
+    // nothing, and that is exactly what the difference measures.
     {
-        neutral (proc);
-        setParam (proc, blend, 100.0f);
-        setParam (proc, drive, 100.0f);
-        setParam (proc, split, 150.0f);
-        setParam (proc, state, 3.0f);       // Collapse, the most destructive voicing
-        setParam (proc, cabinet, 1.0f);
-        proc.reset();
+        auto fundamentalDb = [&proc] (float splitHz, float blendPercent)
+        {
+            neutral (proc);
+            setParam (proc, blend, blendPercent);
+            setParam (proc, drive, 100.0f);
+            setParam (proc, split, splitHz);
+            setParam (proc, state, 3.0f);       // Collapse, the most destructive voicing
+            setParam (proc, cabinet, 1.0f);
+            proc.reset();
 
-        const auto total = (int) (kSampleRate * 2.0);
-        juce::AudioBuffer<float> buffer (2, total);
-        fillSine (buffer, 41.2, 0.4f);      // low E
+            const auto total = (int) (kSampleRate * 2.0);
+            juce::AudioBuffer<float> buffer (2, total);
+            fillSine (buffer, 41.2, 0.4f);      // low E
 
-        const auto window = (int) (kSampleRate * 0.5);
-        const auto start  = total - window;
-        const auto before = magnitudeAt (buffer, 41.2, start, window);
-        runThrough (proc, buffer);
-        const auto after = magnitudeAt (buffer, 41.2, start, window);
+            const auto window = (int) (kSampleRate * 0.5);
+            const auto start  = total - window;
+            const auto before = magnitudeAt (buffer, 41.2, start, window);
+            runThrough (proc, buffer);
+            const auto after = magnitudeAt (buffer, 41.2, start, window);
 
-        const auto delta = juce::Decibels::gainToDecibels (after / juce::jmax (1.0e-9f, before));
-        std::cout << "  low E through full Collapse fuzz: " << juce::String (delta, 2)
-                  << " dB at the fundamental" << std::endl;
-        expect (std::abs (delta) < 2.0f, "the fundamental survives the drive path intact");
+            return juce::Decibels::gainToDecibels (
+                       juce::jmax (1.0e-9f, after) / juce::jmax (1.0e-9f, before));
+        };
+
+        const auto clean   = fundamentalDb (150.0f, 0.0f);
+        const auto split150 = fundamentalDb (150.0f, 100.0f);
+        const auto split20  = fundamentalDb (20.0f, 100.0f);
+
+        std::cout << "  low E, Cone, no fuzz: " << juce::String (clean, 2)
+                  << " dB - full Collapse fuzz costs " << juce::String (split150 - clean, 2)
+                  << " dB with Split at 150 Hz, "
+                  << juce::String (split20 - clean, 2) << " dB with it at 20 Hz" << std::endl;
+
+        expect (std::abs (split150 - clean) < 1.5f,
+                "the fundamental survives the drive path intact");
+        expect (split20 - clean < -3.0f,
+                "without the split, the same fuzz does eat the fundamental");
+
+        // And the amp has to deliver that note in the first place. The cabinet is a
+        // voicing, not an excuse to lose the bottom string.
+        expect (clean > -6.0f, "the cabinet still passes a low E at a usable level");
     }
 
-    // ---- 3. and it does not, without the split -------------------------------
-    // The counterexample. With the crossover parked at the bottom, the same fuzz eats the
-    // same note - which is why the control exists.
-    {
-        neutral (proc);
-        setParam (proc, blend, 100.0f);
-        setParam (proc, drive, 100.0f);
-        setParam (proc, split, 20.0f);
-        setParam (proc, state, 3.0f);
-        setParam (proc, cabinet, 1.0f);
-        proc.reset();
-
-        const auto total = (int) (kSampleRate * 2.0);
-        juce::AudioBuffer<float> buffer (2, total);
-        fillSine (buffer, 41.2, 0.4f);
-
-        const auto window = (int) (kSampleRate * 0.5);
-        const auto start  = total - window;
-        const auto before = magnitudeAt (buffer, 41.2, start, window);
-        runThrough (proc, buffer);
-        const auto after = magnitudeAt (buffer, 41.2, start, window);
-
-        const auto delta = juce::Decibels::gainToDecibels (
-                               juce::jmax (1.0e-9f, after) / juce::jmax (1.0e-9f, before));
-        std::cout << "  ... and with Split at 20 Hz: " << juce::String (delta, 2) << " dB"
-                  << std::endl;
-        expect (delta < -3.0f, "without the split, the same fuzz does eat the fundamental");
-    }
-
-    // ---- 4. every parameter reaches the DSP ----------------------------------
+    // ---- 3. every parameter reaches the DSP ----------------------------------
     // The single highest-value assertion here: a smoothed parameter needs both halves, the
     // target read and the smoother advanced. Miss the first and every knob is silently
     // inert while the plug-in still looks like it works.
@@ -398,7 +416,7 @@ int runCheck()
         }
     }
 
-    // ---- 5. bypass -----------------------------------------------------------
+    // ---- 4. bypass -----------------------------------------------------------
     {
         neutral (proc);
         setParam (proc, blend, 80.0f);
@@ -428,7 +446,7 @@ int runCheck()
         expect (worst < 1.0e-5f, "bypass passes audio through, delayed by exactly that");
     }
 
-    // ---- 6. silence in, silence out ------------------------------------------
+    // ---- 5. silence in, silence out ------------------------------------------
     // Two asymmetric shapers, a squaring term and a bias that moves with level: every one
     // of those is a way to leave DC behind on a signal that has stopped.
     {
@@ -447,7 +465,7 @@ int runCheck()
         expect (after.finite && after.peak < 1.0e-6f, "silence stays silent");
     }
 
-    // ---- 7. bounded under everything -----------------------------------------
+    // ---- 6. bounded under everything -----------------------------------------
     {
         auto worstPeak = 0.0f;
         auto allFinite = true;
@@ -480,7 +498,7 @@ int runCheck()
         expect (worstPeak < 4.0f, "the output stays bounded");
     }
 
-    // ---- 8. the cabinet is a voice, not a volume control ---------------------
+    // ---- 7. the cabinet is a voice, not a volume control ---------------------
     {
         auto bandLevel = [&proc] (int cabinetIndex)
         {
@@ -512,7 +530,7 @@ int runCheck()
         expect (std::abs (cone - steel) < 2.5f, "the two cabinets are level-matched");
     }
 
-    // ---- 9. the modelled low end is actually there ---------------------------
+    // ---- 8. the modelled low end is actually there ---------------------------
     // A guitar 4x12 capture has nothing below 80 Hz, so switching one of these cabinets on
     // would normally cost the bottom octave outright. The parallel modelled port in CabSim
     // is what stops that, and this is the check that would notice if it broke: measured
@@ -540,7 +558,7 @@ int runCheck()
                 "the modelled port replaces the bottom octave the captures do not have");
     }
 
-    // ---- 10. aliasing --------------------------------------------------------
+    // ---- 9. aliasing --------------------------------------------------------
     // Everything not sitting on a harmonic of the input is either aliasing or numerical
     // noise, and at full drive on a three-stage cascade there is plenty of opportunity for
     // the first one.
@@ -600,7 +618,7 @@ int runCheck()
         expect (ratio < -45.0, "aliasing stays below -45 dB");
     }
 
-    // ---- 11. changing things mid-stream --------------------------------------
+    // ---- 10. changing things mid-stream --------------------------------------
     {
         neutral (proc);
         setParam (proc, blend, 100.0f);
@@ -626,7 +644,7 @@ int runCheck()
         expect (finite, "switching state, cabinet and crossover mid-stream stays finite");
     }
 
-    // ---- 12. sample rates ----------------------------------------------------
+    // ---- 11. sample rates ----------------------------------------------------
     {
         auto finite = true;
 
@@ -657,7 +675,7 @@ int runCheck()
         expect (finite, "every supported sample rate stays finite");
     }
 
-    // ---- 13. mono ------------------------------------------------------------
+    // ---- 12. mono ------------------------------------------------------------
     {
         Processor mono;
         mono.setPlayConfigDetails (1, 1, kSampleRate, kBlockSize);
@@ -739,7 +757,10 @@ int runSweep()
               << "bass-shaped noise at -6 dBFS peak\n" << std::endl;
 
     // The reference: a level to aim at that does not itself move when a spec changes.
-    // Straight through the plug-in with nothing collapsed, which is unity by construction.
+    // Straight through the plug-in with nothing collapsed - not unity any more, since the
+    // cabinet sits after the sum and colours this too, but that is the point: the cabinet
+    // is common to both sides of the comparison, so what comes out is what the drive path
+    // did and nothing else.
     auto renderRms = [&proc] (int stateIndex, float drivePercent, bool collapsed)
     {
         neutral (proc);

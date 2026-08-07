@@ -31,15 +31,15 @@ namespace collapse::dsp
 /** The whole signal path.
 
                              +--- low band ------------------------------+
-        in -> LR4 split -----+                                            +-> Weight
-                             +--- high band -+-- (1 - Blend) ------------+     -> ceiling
-                                             |                           |
+        in -> LR4 split -----+                                            +-> cabinet
+                             +--- high band -+-- (1 - Blend) ------------+   -> Weight
+                                             |                           |   -> ceiling
                                              +-- pre-EQ -> [oversampled  |
                                                  2-3 asymmetric stages,  |
                                                  sag, push-pull, octave] |
-                                                 -> tone -> grit -> cab -+-- Blend
+                                                 -> tone -> grit -> HP --+-- Blend
 
-    Three things about that diagram are the whole design.
+    Four things about that diagram are the whole design.
 
     **The low band never enters the drive path.** Distortion of two low fundamentals
     produces sum and difference tones between them, and on a bass those land right in the
@@ -57,9 +57,16 @@ namespace collapse::dsp
     and subtracts from the clean band it was supposed to leave alone. Measured at -4.2 dB
     on a low E before this filter existed. It is the reason for `dirtyHpA/B`.
 
-    **The cabinet only sees the collapsed path.** That is how the rig this imitates is
-    wired - a DI holding the bottom and a driven amp holding the shape - and it means the
-    modelled low end in CabSim never has to fight the real one coming down the clean side.
+    **The cabinet is after the sum, so both paths go through the speaker.** A real rig has
+    one cabinet at the end of it, not one per band, and putting it anywhere else makes this
+    a drive pedal that needs an amp after it rather than the whole chain. It also means the
+    cone model is driven by the actual low end rather than by whatever survived the
+    clipper - which is the half of speaker behaviour that matters most on a bass, because
+    excursion compression is a low-frequency phenomenon and there was barely any low
+    frequency reaching it before.
+
+    The consequence to know about: with a cabinet selected, Blend at 0 is a bass amp rather
+    than a clean DI. Cabinet: Off is the DI.
 
     No JUCE, no allocation outside prepare(), no locks. The maximum block passed to
     process() is fixed at prepare() time.
