@@ -188,12 +188,21 @@ jobs:
             echo "\`$short\` — $subject"
           } >> notes.md
 
+          # Published, but not marked latest: that pointer is what the README's download
+          # link resolves to, and it belongs to the last version somebody deliberately
+          # named rather than to whatever was pushed most recently. Every build is still
+          # one click from the releases page the moment it goes green.
           gh release create "$tag" \
             --target "$GITHUB_SHA" \
+            --latest=false \
             --title "The Collapse of The Wave Function — build ${{ github.run_number }} ($short)" \
             --notes-file notes.md artifacts/*
 
-  # Tags produce a draft, so notes and binaries get a human read before anyone downloads.
+  # A tag publishes outright, and becomes the release the README's "latest" link resolves
+  # to. Nothing waits for a human: the build job is the gate, and it has already run every
+  # check in devtool and put pluginval over the VST3 at strictness 8 before this job is
+  # reached at all. A draft here only meant the binaries sat unreachable until somebody
+  # remembered to click.
   tagged-release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
@@ -207,6 +216,6 @@ jobs:
       - env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --draft --generate-notes \
+          gh release create "${GITHUB_REF_NAME}" --generate-notes --latest \
             --repo "${GITHUB_REPOSITORY}" \
             --title "The Collapse of The Wave Function ${GITHUB_REF_NAME}" artifacts/*
